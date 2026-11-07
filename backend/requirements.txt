@@ -1,11 +1,5 @@
-# VERITAS Backend Dependencies
-# Core web service dependencies
+# VERITAS Core Backend Dependencies (Lightweight Web Service)
+# Minimal ASGI framework and data validation dependencies (< 50 MB footprint, runs within Render 512 MB RAM)
 fastapi>=0.115.0
 uvicorn>=0.30.0
 pydantic>=2.8.0
-
-# Transformer neural model inference dependencies (lazy-loaded)
-torch>=2.0.0
-transformers>=4.40.0
-safetensors>=0.4.0
-

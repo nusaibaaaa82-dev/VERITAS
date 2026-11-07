@@ -1,0 +1,8 @@
+# VERITAS Neural Model Inference Dependencies (Optional / Local / High-RAM)
+# Install when local neural inference with Hugging Face transformers is desired:
+# pip install -r backend/requirements-models.txt
+-r requirements.txt
+torch>=2.0.0
+transformers>=4.40.0
+safetensors>=0.4.0
+
