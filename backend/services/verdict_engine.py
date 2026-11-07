@@ -25,7 +25,7 @@ Strict Reliability Rules Enforced:
 
 import hashlib
 import re
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 from backend.config import settings
 from backend.schemas.claim import (
