@@ -1,6 +1,32 @@
+# Dependencies
 node_modules/
-dist/
-.env
-.env.local
-__pycache__/
+frontend/node_modules/
 .venv/
+backend/.venv/
+
+# Build outputs
+dist/
+frontend/dist/
+
+# Environment variables & secrets
+.env
+.env.*
+*.env
+
+# Python runtime & cache
+__pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+
+# Operating system files
+.DS_Store
+*/.DS_Store
+*/*/.DS_Store
+Thumbs.db
+
+# Local scratch and test logs
+scratch/
+*.log
