@@ -17,11 +17,6 @@ services:
         value: "true"
       - key: RATE_LIMIT_REQUESTS_PER_MINUTE
         value: "20"
-      - key: CORS_ALLOWED_ORIGINS
-        fromService:
-          type: web
-          name: veritas-frontend
-          property: url
 
   # ----------------------------------------------------------------------------
   # 2. VERITAS Interactive Frontend (Render Free Static Site)
