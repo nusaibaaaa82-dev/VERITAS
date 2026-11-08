@@ -69,7 +69,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=configured_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
 
@@ -157,8 +157,9 @@ def api_info():
     }
 
 
-@app.get(
+@app.api_route(
     "/health",
+    methods=["GET", "HEAD"],
     summary="Health Check",
     description="Returns health status of the API service.",
     tags=["System"],

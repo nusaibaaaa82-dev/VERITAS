@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { checkBackendHealth, verifyClaimApi } from '../services/api';
+import { API_BASE_URL, checkBackendHealth, verifyClaimApi } from '../services/api';
 import type { VerificationResultResponse } from '../types';
 import { VerificationResultPanel } from './VerificationResultPanel';
 
@@ -76,12 +76,17 @@ export const Hero = ({ inputRef }: HeroProps) => {
       setVerificationResult(response);
       setBackendStatus('connected');
     } catch (error: unknown) {
+      const targetApi = API_BASE_URL || 'the backend server';
       const errorMsg =
         error instanceof Error
           ? error.message
-          : 'Unable to connect to the VERITAS backend. Please ensure the server is running on port 8000.';
+          : `Unable to connect to the VERITAS backend at ${targetApi}. Please ensure the server is running and accessible.`;
       setErrorMessage(errorMsg);
-      if (errorMsg.includes('Cannot connect') || errorMsg.includes('Network error')) {
+      if (
+        errorMsg.includes('Cannot connect') ||
+        errorMsg.includes('Network error') ||
+        errorMsg.includes('Failed to fetch')
+      ) {
         setBackendStatus('disconnected');
       }
     } finally {
@@ -167,10 +172,13 @@ export const Hero = ({ inputRef }: HeroProps) => {
             </div>
             <div className="claim-card-meta">
               <span className="meta-tag">Multilingual: 100+ Languages</span>
-              <span className="meta-tag health-tag" title="Backend API status at http://localhost:8000/health">
+              <span
+                className="meta-tag health-tag"
+                title={`Backend API health: ${API_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : '')}/health`}
+              >
                 <span className={`health-dot dot-${backendStatus}`} />
                 {backendStatus === 'connected' && 'API: Online'}
-                {backendStatus === 'disconnected' && 'API: Offline (port 8000)'}
+                {backendStatus === 'disconnected' && (API_BASE_URL ? 'API: Offline' : 'API: Offline (port 8000)')}
                 {backendStatus === 'checking' && 'API: Checking...'}
               </span>
             </div>

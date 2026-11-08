@@ -1,4 +1,5 @@
 import type { VerificationResultResponse } from '../types';
+import { API_BASE_URL } from '../services/api';
 
 interface VerificationResultPanelProps {
   result: VerificationResultResponse | null;
@@ -79,9 +80,18 @@ export const VerificationResultPanel = ({
         <div className="error-guidance">
           <span className="guidance-label">Diagnostic Tip:</span>
           <span>
-            Verify that your backend server is running with{' '}
-            <code>uvicorn backend.main:app --reload --port 8000</code> and accessible at{' '}
-            <code>http://localhost:8000/health</code>.
+            {API_BASE_URL ? (
+              <>
+                Ensure the backend service is running and accessible at{' '}
+                <code>{API_BASE_URL}/health</code>.
+              </>
+            ) : (
+              <>
+                Verify that your backend server is running with{' '}
+                <code>uvicorn backend.main:app --reload --port 8000</code> and accessible at{' '}
+                <code>http://localhost:8000/health</code>.
+              </>
+            )}
           </span>
         </div>
       </div>

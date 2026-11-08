@@ -33,6 +33,9 @@ class Settings:
         "http://127.0.0.1:5174",
         "http://localhost:7860",
         "http://127.0.0.1:7860",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "https://veritas-frontend-0lhx.onrender.com",
     )
 
     # Evidence Repository Configuration (Local SQLite + FTS5)
