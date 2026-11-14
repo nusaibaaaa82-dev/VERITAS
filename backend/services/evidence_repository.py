@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from backend.config import settings
 from backend.schemas.claim import (
     CurationAuditLogEntry,
@@ -34,6 +34,12 @@ from backend.services.normalization import (
     normalize_domain,
     normalize_publisher,
 )
+from backend.services.relevance_engine import STOPWORDS as RELEVANCE_STOPWORDS
+
+# High-frequency grammatical stopwords filtered from FTS5 prefix expansion to prevent broad, irrelevant matching
+FTS_STOPWORDS: Set[str] = set(RELEVANCE_STOPWORDS) | {
+    "the", "a", "an", "around", "of", "to", "and", "or", "is", "in", "on", "at", "by", "for", "with"
+}
 
 
 class EvidenceRepository:
@@ -227,7 +233,14 @@ class EvidenceRepository:
 
     @staticmethod
     def sanitize_fts_query(query: str) -> str:
-        """Sanitize raw query string preserving Unicode scripts (Latin, Devanagari, Bengali, etc.)."""
+        """Sanitize raw query string preserving Unicode scripts (Latin, Devanagari, Bengali, etc.).
+
+        Safeguards:
+        - Drops high-frequency grammatical stopwords (the, a, an, around, of, to, and, or, is...)
+          to prevent unconstrained wildcard disjunctions from matching arbitrary records.
+        - Preserves substantive content terms across Unicode scripts.
+        - Returns empty string for empty or stopword-only queries to fail closed safely.
+        """
         if not query or not query.strip():
             return ""
         # Characters that break SQLite FTS5 query syntax or formatting
@@ -236,7 +249,7 @@ class EvidenceRepository:
         tokens = []
         for t in raw_tokens:
             clean = "".join(ch for ch in t if ch not in bad_chars).strip()
-            if len(clean) >= 2:
+            if len(clean) >= 2 and clean.lower() not in FTS_STOPWORDS:
                 tokens.append(clean)
         if not tokens:
             return ""
@@ -597,8 +610,15 @@ class EvidenceRepository:
         """Perform full-text search against the evidence repository.
 
         Uses FTS5 when available; gracefully falls back to parameterized LIKE matching.
+        Fails closed on empty or stopword-only queries to prevent broad irrelevant retrieval.
         """
         if not query or not query.strip():
+            return []
+
+        safe_fts = self.sanitize_fts_query(query)
+        if not safe_fts:
+            # Query contains only stopwords, punctuation, or whitespace.
+            # Fail closed: never generate broad unconstrained matches for empty/stopword queries.
             return []
 
         results: List[EvidenceItem] = []
@@ -607,29 +627,27 @@ class EvidenceRepository:
 
             # Attempt FTS5 query if available
             if self.fts5_available:
-                safe_fts = self.sanitize_fts_query(query)
-                if safe_fts:
-                    try:
-                        sql = """
-                        SELECT r.*
-                        FROM evidence_fts f
-                        JOIN evidence_records r ON f.id = r.id
-                        WHERE evidence_fts MATCH ?
-                        """
-                        params: List[object] = [safe_fts]
-                        if verified_only:
-                            sql += " AND r.is_verified = 1"
-                        sql += " ORDER BY rank LIMIT ?"
-                        params.append(limit)
+                try:
+                    sql = """
+                    SELECT r.*
+                    FROM evidence_fts f
+                    JOIN evidence_records r ON f.id = r.id
+                    WHERE evidence_fts MATCH ?
+                    """
+                    params: List[object] = [safe_fts]
+                    if verified_only:
+                        sql += " AND r.is_verified = 1"
+                    sql += " ORDER BY rank LIMIT ?"
+                    params.append(limit)
 
-                        cursor.execute(sql, params)
-                        rows = cursor.fetchall()
-                        for row in rows:
-                            results.append(self._row_to_item(row))
-                        return results
-                    except sqlite3.OperationalError:
-                        # FTS5 syntax or matching issue -> fallback to LIKE
-                        pass
+                    cursor.execute(sql, params)
+                    rows = cursor.fetchall()
+                    for row in rows:
+                        results.append(self._row_to_item(row))
+                    return results
+                except sqlite3.OperationalError:
+                    # FTS5 syntax or matching issue -> fallback to LIKE
+                    pass
 
             # Fallback parameterized LIKE matching
             search_pattern = f"%{query.strip()[:100]}%"

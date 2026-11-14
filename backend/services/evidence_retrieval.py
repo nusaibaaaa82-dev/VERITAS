@@ -158,19 +158,17 @@ class EvidenceRetrievalService:
         if not text:
             return ""
         tokens = [t for t in cls.tokenize_unicode_words(text) if t not in STOPWORDS]
-        return " ".join(tokens[:8])
+        return " ".join(tokens[:16])
 
     @classmethod
-    def formulate_concept_mapped_query(cls, text: str, language: str) -> str:
-        """Formulate targeted English concept search query for non-English queries against English indices.
+    def formulate_concept_mapped_query(cls, text: str, language: str = "en") -> str:
+        """Formulate targeted concept search query using domain concept mappings across languages.
 
-        Preserves the user's submitted claim unchanged while enabling cross-lingual
-        discovery in English-indexed scientific literature catalogs (PubMed, NASA, USGS).
+        Preserves the user's submitted claim unchanged while enabling semantic and
+        cross-lingual discovery in literature catalogs and the local evidence repository.
         """
         if not text:
             return ""
-        if (language or "en").lower() == "en":
-            return cls.formulate_native_query(text)
 
         tokens = cls.tokenize_unicode_words(text)
         mapped_concepts: List[str] = []
@@ -336,7 +334,12 @@ class EvidenceRetrievalService:
         concept_q = self.formulate_concept_mapped_query(clean_claim, language=lang_code)
 
         # Step 1: Query local SQLite repository (searching cross-lingual concepts and native terms)
-        local_search_q = f"{concept_q} {native_q}".strip() if (concept_q and concept_q != native_q) else clean_claim
+        if concept_q and native_q:
+            local_search_q = f"{concept_q} {native_q}".strip() if concept_q != native_q else concept_q
+        elif concept_q or native_q:
+            local_search_q = (concept_q or native_q).strip()
+        else:
+            local_search_q = clean_claim
         local_records = self.repository.search_evidence(
             query=local_search_q,
             limit=15,
