@@ -7,7 +7,7 @@ empirical independence verification, and authority clustering.
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
