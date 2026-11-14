@@ -26,7 +26,9 @@ Strict Reliability Rules Enforced:
 
 from datetime import datetime, timezone
 import hashlib
+import logging
 import re
+import sqlite3
 import uuid
 from typing import Optional, Set
 from backend.models.model_manager import ModelManager
@@ -38,7 +40,14 @@ from backend.schemas.claim import (
 from backend.services.claim_decomposition import ClaimDecompositionService
 from backend.services.evidence_retrieval import EvidenceRetrievalService
 from backend.services.proposition_matcher import PropositionMatcherService
+from backend.services.source_relationship_engine import (
+    MissingRelationshipSchemaError,
+    PropositionCorroborationEngine,
+    SourceRelationshipRepository,
+)
 from backend.services.verdict_engine import VerdictEngine
+
+logger = logging.getLogger(__name__)
 
 
 class VerificationPipeline:
@@ -50,6 +59,8 @@ class VerificationPipeline:
         "been", "from", "which", "their", "about", "between", "there", "would",
         "should", "could", "through", "is", "are", "was", "were", "and", "or",
         "in", "on", "at", "to", "for", "of", "by", "an", "not", "than",
+        "can", "cannot", "never", "without", "must", "all", "any", "under",
+        "immigrant", "immigrants", "wage", "wages", "workplace",
         "global", "temperature", "temperatures", "increase", "increased",
         "climate", "warming", "vaccine", "vaccines", "reduce", "reduces",
         "risk", "severe", "disease", "diseases", "infectious", "carbon",
@@ -112,12 +123,67 @@ class VerificationPipeline:
         verdict_engine: Optional[VerdictEngine] = None,
         decomposition_service: Optional[ClaimDecompositionService] = None,
         proposition_matcher: Optional[PropositionMatcherService] = None,
+        relationship_repo: Optional[SourceRelationshipRepository] = None,
+        corroboration_engine: Optional[PropositionCorroborationEngine] = None,
     ):
         self.evidence_service = evidence_service or EvidenceRetrievalService()
         self.model_manager = model_manager or ModelManager()
         self.verdict_engine = verdict_engine or VerdictEngine()
         self.decomposition_service = decomposition_service or ClaimDecompositionService()
-        self.proposition_matcher = proposition_matcher or PropositionMatcherService()
+
+        # Connect relationship repository and corroboration engine
+        if corroboration_engine:
+            self.corroboration_engine = corroboration_engine
+            self.relationship_repo = corroboration_engine.repo
+        elif relationship_repo:
+            self.relationship_repo = relationship_repo
+            self.corroboration_engine = PropositionCorroborationEngine(relationship_repo)
+        elif (
+            hasattr(self.evidence_service, "repository")
+            and self.evidence_service.repository
+            and getattr(self.evidence_service.repository, "db_path", None)
+        ):
+            try:
+                db_path = self.evidence_service.repository.db_path
+                # Check whether relationship tables are present before attempting repository creation.
+                # VerificationPipeline must never execute DDL or silently migrate unmigrated databases.
+                conn = sqlite3.connect(db_path)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_pair_relationships'"
+                )
+                tables_present = cursor.fetchone() is not None
+                conn.close()
+
+                if tables_present:
+                    self.relationship_repo = SourceRelationshipRepository(db_path)
+                    self.corroboration_engine = PropositionCorroborationEngine(self.relationship_repo)
+                else:
+                    logger.info(
+                        "VerificationPipeline: relationship tables not found in '%s'; "
+                        "running safely in unmigrated compatibility mode.",
+                        db_path,
+                    )
+                    self.relationship_repo = None
+                    self.corroboration_engine = None
+            except MissingRelationshipSchemaError as e:
+                logger.info("VerificationPipeline unmigrated schema note: %s", e)
+                self.relationship_repo = None
+                self.corroboration_engine = None
+            except Exception as e:
+                logger.warning("VerificationPipeline relationship repository auto-wire failed: %s", e)
+                self.relationship_repo = None
+                self.corroboration_engine = None
+        else:
+            self.relationship_repo = None
+            self.corroboration_engine = None
+
+        if proposition_matcher:
+            self.proposition_matcher = proposition_matcher
+        else:
+            self.proposition_matcher = PropositionMatcherService(
+                corroboration_engine=self.corroboration_engine
+            )
 
     def identify_language(self, text: str, user_hint: Optional[str] = None) -> LanguageInfo:
         """Identify the primary language of the claim statement.

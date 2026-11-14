@@ -5,9 +5,23 @@ the verification pipeline, ensuring strict type safety, input validation,
 and auditable documentation.
 """
 
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from typing import Dict, List, Literal, Optional
+from pydantic import BaseModel, Field, field_validator, model_validator
 from backend.config import settings
+
+# Canonical Curation Types
+CurationStatus = Literal[
+    "UNREVIEWED",
+    "UNDER_REVIEW",
+    "APPROVED_VERIFIED",
+    "REJECTED_IRRELEVANT",
+    "REJECTED_UNRELIABLE",
+    "SUPERSEDED",
+]
+
+ReviewerConfirmedStance = Literal["SUPPORTING", "CONTRADICTING", "NEUTRAL"]
+TextProvenance = Literal["VERBATIM", "SUMMARY", "INTERPRETATION", "UNAVAILABLE"]
+RetrievalMethod = Literal["LIVE", "OFFLINE_FALLBACK", "UNKNOWN"]
 
 
 class LanguageInfo(BaseModel):
@@ -138,6 +152,14 @@ class EvidenceItem(BaseModel):
         default="METADATA_ONLY",
         description="Text availability: 'METADATA_ONLY', 'ABSTRACT', 'EXCERPT', or 'FULL_TEXT'. Never claim full text if only abstract or metadata is available.",
     )
+    text_provenance: TextProvenance = Field(
+        default="UNAVAILABLE",
+        description="Text provenance classification: 'VERBATIM' (exact source quotation), 'SUMMARY' (faithful summary/paraphrase), 'INTERPRETATION' (legal/editorial analysis or synthesis), or 'UNAVAILABLE' (no body text).",
+    )
+    retrieval_method: RetrievalMethod = Field(
+        default="UNKNOWN",
+        description="Retrieval method origin: 'LIVE' (retrieved directly via live network request), 'OFFLINE_FALLBACK' (loaded from offline catalog fallback / cache), or 'UNKNOWN' (unspecified).",
+    )
     relevance_status: str = Field(
         default="UNDETERMINED",
         description="Relevance to submitted claim: 'RELEVANT', 'IRRELEVANT', 'OFF_TOPIC', or 'UNDETERMINED'.",
@@ -202,6 +224,127 @@ class EvidenceItem(BaseModel):
         default=None,
         description="Traceability metadata including retrieval timestamp, archival record, and content hash.",
     )
+    curation_status: CurationStatus = Field(
+        default="UNREVIEWED",
+        description="Reviewer curation status: 'UNREVIEWED', 'UNDER_REVIEW', 'APPROVED_VERIFIED', 'REJECTED_IRRELEVANT', 'REJECTED_UNRELIABLE', or 'SUPERSEDED'.",
+    )
+    reviewer_id: Optional[str] = Field(
+        default=None,
+        description="Identifier of the human reviewer who performed curation.",
+    )
+    review_timestamp: Optional[str] = Field(
+        default=None,
+        description="ISO 8601 timestamp when curation was conducted.",
+    )
+    reviewer_notes: Optional[str] = Field(
+        default=None,
+        description="Reviewer rationale, verification methodology, and scientific justification.",
+    )
+    reviewer_confirmed_stance: Optional[ReviewerConfirmedStance] = Field(
+        default=None,
+        description="Human confirmed stance relative to the claim ('SUPPORTING', 'CONTRADICTING', or 'NEUTRAL').",
+    )
+    peer_review_confirmed: bool = Field(
+        default=False,
+        description="Whether publication in a peer-reviewed scientific journal or authoritative agency archive was confirmed by reviewer.",
+    )
+    operational_status: str = Field(
+        default="UNKNOWN",
+        description="Administrative and legal operational vitality ('CURRENT_OPERATIVE', 'ARCHIVED_DISCONTINUED', 'REPEALED_VACATED', 'SUPERSEDED', 'HISTORICAL_ONLY', 'UNKNOWN', 'NOT_APPLICABLE').",
+    )
+    domain: str = Field(
+        default="EMPIRICAL_NON_LEGAL",
+        description="Epistemological domain of evidence ('LEGAL', 'EMPIRICAL_NON_LEGAL', 'EMPIRICAL_POLICY_CONTEXT').",
+    )
+    effective_from_date: Optional[str] = Field(
+        default=None,
+        description="ISO 8601 date (YYYY-MM-DD, YYYY-MM, or YYYY) when authority became legally effective.",
+    )
+    effective_to_date: Optional[str] = Field(
+        default=None,
+        description="ISO 8601 date when authority was repealed, vacated, superseded, or sunset.",
+    )
+    enactment_date: Optional[str] = Field(
+        default=None,
+        description="ISO 8601 date when legislation was signed or passed.",
+    )
+    textual_epoch: Optional[str] = Field(
+        default=None,
+        description="Chronological authenticity of text ('HISTORICAL_CONTEMPORARY', 'CODIFIED_RETROSPECTIVE', 'CURRENT_CONSOLIDATED').",
+    )
+
+
+class CurationReviewDecision(BaseModel):
+    """Structured decision submitted by a human reviewer for an evidence record."""
+
+    evidence_id: str = Field(..., description="Unique ID of the evidence record being curated.")
+    claim_id: Optional[str] = Field(default=None, description="Optional associated claim ID if review is claim-specific.")
+    curation_status: CurationStatus = Field(..., description="Target curation status.")
+    reviewer_id: str = Field(..., description="Unique identifier or username of the reviewer.")
+    reviewer_notes: Optional[str] = Field(default=None, description="Detailed reasoning and justification for the decision.")
+    reviewer_confirmed_stance: Optional[ReviewerConfirmedStance] = Field(
+        default=None,
+        description="Reviewer-confirmed stance relative to the claim ('SUPPORTING', 'CONTRADICTING', or 'NEUTRAL').",
+    )
+    peer_review_confirmed: bool = Field(
+        default=False,
+        description="Whether publication in a peer-reviewed scientific journal or authoritative agency archive was confirmed by reviewer.",
+    )
+    # CurationReviewDecision operational status
+    operational_status: Optional[str] = Field(
+        default=None,
+        description="Optional reviewer-assigned operational status ('CURRENT_OPERATIVE', 'ARCHIVED_DISCONTINUED', 'REPEALED_VACATED', 'SUPERSEDED', 'HISTORICAL_ONLY', 'UNKNOWN', 'NOT_APPLICABLE').",
+    )
+    text_provenance: Optional[TextProvenance] = Field(
+        default=None,
+        description="Reviewer-confirmed text provenance classification ('VERBATIM', 'SUMMARY', 'INTERPRETATION', or 'UNAVAILABLE').",
+    )
+
+    @field_validator("reviewer_id")
+    @classmethod
+    def validate_reviewer_id_not_empty(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("Reviewer ID cannot be empty or whitespace.")
+        return trimmed
+
+    @model_validator(mode="after")
+    def validate_approved_verified_stance(self) -> "CurationReviewDecision":
+        """Enforce that APPROVED_VERIFIED requires an explicit decisive stance (SUPPORTING or CONTRADICTING)."""
+        if self.curation_status == "APPROVED_VERIFIED":
+            if not self.reviewer_confirmed_stance:
+                raise ValueError(
+                    "APPROVED_VERIFIED status requires an explicit reviewer-confirmed stance ('SUPPORTING' or 'CONTRADICTING'). "
+                    "Cannot approve evidence without confirmed decisive stance."
+                )
+            if self.reviewer_confirmed_stance not in ("SUPPORTING", "CONTRADICTING"):
+                raise ValueError(
+                    f"APPROVED_VERIFIED status requires a decisive stance ('SUPPORTING' or 'CONTRADICTING'), "
+                    f"got '{self.reviewer_confirmed_stance}'. Neutral evidence cannot be approved as verified."
+                )
+        return self
+
+
+class CurationAuditLogEntry(BaseModel):
+    """Audit log entry representing a historical curation decision."""
+
+    audit_id: int = Field(..., description="Auto-incremented audit log ID.")
+    evidence_id: str = Field(..., description="Unique ID of the evidence record.")
+    claim_id: Optional[str] = Field(default=None, description="Optional associated claim ID.")
+    previous_status: str = Field(..., description="Previous curation status.")
+    new_status: str = Field(..., description="New curation status.")
+    previous_stance: Optional[str] = Field(default=None, description="Previous stance before review.")
+    new_stance: Optional[str] = Field(default=None, description="New reviewer-confirmed stance.")
+    reviewer_id: str = Field(..., description="Identifier of the reviewer.")
+    reviewer_notes: Optional[str] = Field(default=None, description="Reviewer rationale and notes.")
+    decision_timestamp: str = Field(..., description="ISO 8601 timestamp of the decision.")
+
+
+class CurationQueueResponse(BaseModel):
+    """Response model for paginated curation queue queries."""
+
+    total_count: int = Field(..., description="Total number of evidence records matching query criteria.")
+    items: List[EvidenceItem] = Field(..., description="List of evidence items in the current page.")
 
 
 class ModelInferenceResult(BaseModel):
@@ -357,6 +500,34 @@ class PropositionItem(BaseModel):
         default=None,
         description="Analytical rationale for proposition boundary identification.",
     )
+    temporal_scope: Optional[str] = Field(
+        default="PRESENT_OPERATIONAL",
+        description="Temporal frame of reference for assertion ('PRESENT_OPERATIONAL', 'HISTORICAL', 'HISTORICAL_LEGAL', 'TIME_INVARIANT_LEGAL_RULE', 'TIME_INVARIANT_LEGAL_MAXIM', 'EMPIRICAL_NON_LEGAL', 'UNKNOWN').",
+    )
+    reference_period_start: Optional[str] = Field(
+        default=None,
+        description="ISO 8601 date (YYYY-MM-DD, YYYY-MM, or YYYY) start of claimed event/scope.",
+    )
+    reference_period_end: Optional[str] = Field(
+        default=None,
+        description="ISO 8601 date (YYYY-MM-DD, YYYY-MM, or YYYY) end of claimed event/scope.",
+    )
+    temporal_quantification: Optional[str] = Field(
+        default="INTERSECTING",
+        description="Temporal quantification modality ('INTERSECTING', 'CONTINUOUS_FULL_PERIOD', 'POINT_IN_TIME').",
+    )
+    canonical_id: Optional[str] = Field(
+        default=None,
+        description="Deterministic semantic proposition identifier (prop_{decomp_version}_{claim_hash}_{prop_hash}).",
+    )
+    canonical_proposition_hash: Optional[str] = Field(
+        default=None,
+        description="Deterministic SHA-256 digest of normalized proposition assertion.",
+    )
+    domain: Optional[str] = Field(
+        default="LEGAL",
+        description="Epistemological domain of proposition ('LEGAL', 'EMPIRICAL_NON_LEGAL', 'EMPIRICAL_POLICY_CONTEXT').",
+    )
 
 
 class PropositionEvidenceMatch(BaseModel):
@@ -413,6 +584,34 @@ class PropositionCoverage(BaseModel):
     matches: List[PropositionEvidenceMatch] = Field(
         default_factory=list,
         description="List of detailed evidence match records associated with this proposition.",
+    )
+    independent_corroboration: bool = Field(
+        default=False,
+        description="True if proposition is corroborated by >= 2 independent verified clusters.",
+    )
+    authority_clusters_count: int = Field(
+        default=0,
+        description="Count of distinct independent authority clusters formed for this proposition.",
+    )
+    cluster_stances: List[str] = Field(
+        default_factory=list,
+        description="Stances assigned to formed authority clusters ('SUPPORTING', 'CONTRADICTING', 'CONFLICTING', etc.).",
+    )
+    cluster_details: Optional[List[Dict]] = Field(
+        default=None,
+        description="Detailed authority cluster breakdowns including member evidence IDs and stances.",
+    )
+    verified_independent_pairs_count: int = Field(
+        default=0,
+        description="Count of verified independent cross-cluster relationship pairs.",
+    )
+    has_two_independent_sources: bool = Field(
+        default=False,
+        description="Whether the Two-Key Gate threshold is satisfied (>= 2 independent clusters and >= 1 verified independent pair).",
+    )
+    diagnostic_notes: Optional[str] = Field(
+        default=None,
+        description="Detailed diagnostic notes from proposition corroboration evaluation.",
     )
     notes: Optional[str] = Field(default=None, description="Diagnostic coverage notes.")
 

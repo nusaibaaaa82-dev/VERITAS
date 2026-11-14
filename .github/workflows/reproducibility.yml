@@ -1,0 +1,41 @@
+name: VERITAS Release 1.0 Linux Reproducibility & Safety Test
+
+'on':
+  workflow_dispatch:
+  push:
+    branches:
+      - release-v1.0-prep
+
+jobs:
+  linux-reproducibility-test:
+    name: Ubuntu Linux Reproducibility & Safety Verification
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: .
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run clean database initializer
+        run: |
+          python backend/scripts/init_database.py
+
+      - name: Run database reproducibility test suite (14 tests)
+        run: |
+          python -m unittest tests/test_database_reproducibility.py -v
+
+      - name: Run regression test suite (16 tests)
+        run: |
+          python tests/test_legal_terminology_matching.py
+          python tests/test_employment_rights_workflow.py
+          python tests/test_pipeline_flow.py

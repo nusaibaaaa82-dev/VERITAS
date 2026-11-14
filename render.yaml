@@ -7,7 +7,7 @@ services:
     runtime: python
     plan: free
     region: oregon
-    buildCommand: pip install -r backend/requirements.txt
+    buildCommand: pip install -r backend/requirements.txt && python backend/scripts/init_database.py
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /health
     envVars:

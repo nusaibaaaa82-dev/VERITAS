@@ -32,6 +32,8 @@ from backend.schemas.claim import EvidenceItem
 from backend.services.evidence_repository import EvidenceRepository
 from backend.services.providers.base import BaseEvidenceProvider
 from backend.services.providers.crossref import CrossrefProvider
+from backend.services.providers.dol_whd import DolWhdProvider
+from backend.services.providers.ecfr import EcfrProvider
 from backend.services.providers.nasa_ntrs import NasaNtrsProvider
 from backend.services.providers.openalex import OpenAlexProvider
 from backend.services.providers.pubmed import PubMedProvider
@@ -106,6 +108,25 @@ class EvidenceRetrievalService:
         "অভিবাসী", "প্রবাসী", "অভিবাসন", "শরণার্থী", "বহিষ্কার", "রেমিট্যান্স",
     }
 
+    EMPLOYMENT_KEYWORDS: Set[str] = {
+        # English
+        "wage", "wages", "salary", "salaries", "overtime", "theft", "paycheck",
+        "workplace", "worker", "workers", "employee", "employees", "employer",
+        "employers", "labor", "labour", "employment", "minimum wage", "flsa",
+        "osha", "subminimum", "working conditions", "retaliate", "retaliation",
+        # Spanish
+        "salario", "salarios", "sueldo", "sueldos", "robo de salario", "robo",
+        "horas extras", "lugar de trabajo", "trabajador", "trabajadores",
+        "empleado", "empleados", "empleador", "empleadores", "laboral", "empleo",
+        "salario mínimo", "represalia", "represalias",
+        # Hindi
+        "मजदूरी", "वेतन", "मजदूरी चोरी", "वेतन चोरी", "कार्यस्थल", "ओवरटाइम",
+        "श्रमिक", "मजदूर", "कर्मचारी", "नियोक्ता", "श्रम", "रोजगार", "न्यूनतम मजदूरी",
+        # Bengali
+        "মজুরি", "বেতন", "মজুরি চুরি", "কর্মক্ষেত্র", "ওভারটাইম", "শ্রমিক",
+        "কর্মী", "কর্মচারী", "নিয়োগকর্তা", "শ্রম", "কর্মসংস্থান", "ন্যূনতম মজুরি",
+    }
+
     @staticmethod
     def tokenize_unicode_words(text: str) -> List[str]:
         """Extract word tokens from text preserving Unicode letters, numbers, and combining marks (Mn, Mc, Me).
@@ -165,7 +186,7 @@ class EvidenceRetrievalService:
                 if m not in seen and m not in STOPWORDS:
                     seen.add(m)
                     dedup.append(m)
-            return " ".join(dedup[:8])
+            return " ".join(dedup[:15])
         return cls.formulate_native_query(text)
 
     @staticmethod
@@ -226,7 +247,13 @@ class EvidenceRetrievalService:
                 rel_rank = 0
             rel_score = it.relevance_score or 0.0
             tier_rank = 2 if it.source_tier == "PRIMARY" else (1 if it.source_tier == "SECONDARY" else 0)
-            return (has_substantive_text, rel_rank, rel_score, tier_rank)
+            return (rel_rank, has_substantive_text, rel_score, tier_rank)
+
+        # Safeguard: When relevant records exist, do not present irrelevant records as evidence
+        relevant_candidates = [it for it in unique_evaluated if it.relevance_status != "IRRELEVANT"]
+        if relevant_candidates:
+            relevant_candidates.sort(key=ranking_key, reverse=True)
+            return relevant_candidates[:10]
 
         unique_evaluated.sort(key=ranking_key, reverse=True)
         return unique_evaluated[:10]
@@ -244,16 +271,34 @@ class EvidenceRetrievalService:
             "who_gho": WhoGhoProvider(),
             "who_iris": WhoIrisProvider(),
             "world_bank": WorldBankProvider(),
+            "dol_whd": DolWhdProvider(),
+            "ecfr": EcfrProvider(),
         }
         self.is_connected: bool = True
         self.retrieval_backend: str = "sqlite_fts5" if self.repository.fts5_available else "sqlite_like"
         self.last_routing_info: Dict[str, object] = {}
 
     def detect_claim_domain(self, claim: str) -> str:
-        """Categorize claim into HEALTH, CLIMATE, IMMIGRATION, or GENERAL_SCIENCE for targeted evidence routing."""
+        """Categorize claim into EMPLOYMENT_RIGHTS, HEALTH, CLIMATE, IMMIGRATION, or GENERAL_SCIENCE for targeted evidence routing.
+
+        Reliability Rule:
+        Identify employment and wage-theft claims before routing them to generic immigration or biomedical providers.
+        """
         if not claim or not claim.strip():
             return "GENERAL_SCIENCE"
         words = set(self.tokenize_unicode_words(claim))
+        claim_lower = claim.lower()
+
+        # Step 2: Prioritize employment and wage-theft claims
+        if words.intersection(self.EMPLOYMENT_KEYWORDS) or any(
+            phrase in claim_lower for phrase in (
+                "wage theft", "wage", "wages", "minimum wage", "overtime",
+                "workplace", "unpaid wages", "robo de salario", "robo de sueldo",
+                "मजदूरी चोरी", "वेतन चोरी", "মজুরি চুরি"
+            )
+        ):
+            return "EMPLOYMENT_RIGHTS"
+
         if words.intersection(self.HEALTH_KEYWORDS):
             return "HEALTH"
         if words.intersection(self.CLIMATE_KEYWORDS):
@@ -290,8 +335,8 @@ class EvidenceRetrievalService:
         native_q = self.formulate_native_query(clean_claim)
         concept_q = self.formulate_concept_mapped_query(clean_claim, language=lang_code)
 
-        # Step 1: Query local SQLite repository (searching native terms and cross-lingual concepts)
-        local_search_q = f"{clean_claim} {concept_q}".strip() if (concept_q and concept_q != clean_claim) else clean_claim
+        # Step 1: Query local SQLite repository (searching cross-lingual concepts and native terms)
+        local_search_q = f"{concept_q} {native_q}".strip() if (concept_q and concept_q != native_q) else clean_claim
         local_records = self.repository.search_evidence(
             query=local_search_q,
             limit=15,
@@ -304,7 +349,25 @@ class EvidenceRetrievalService:
         skipped_providers: Dict[str, str] = {}
         routing_reason: str = ""
 
-        if domain == "HEALTH":
+        if domain == "EMPLOYMENT_RIGHTS":
+            scholarly_providers = ["dol_whd", "ecfr"]
+            skipped_providers = {
+                "pubmed": "Domain mismatch (Biomedical clinical trials, not labor standards or wage protections)",
+                "nasa_ntrs": "Domain mismatch (Aerospace / Earth observations, not employment law)",
+                "usgs_pubs": "Domain mismatch (Geology & hydrology, not labor rights)",
+                "who_gho": "Domain mismatch (International health indicators, not U.S. employment law)",
+                "world_bank": "Domain mismatch (Global macroeconomic development, not U.S. worker wage rights)",
+                "openalex": "Provider limit: official federal labor agencies prioritized (DOL WHD + eCFR selected)",
+                "crossref": "Provider limit: official federal labor agencies prioritized",
+            }
+            routing_reason = (
+                "Selected official employment rights providers: U.S. Department of Labor Wage and Hour Division (WHD) "
+                "and Electronic Code of Federal Regulations (eCFR Title 29 - Labor). "
+                "Prioritized direct federal enforcement guidance and statutory labor protections. "
+                "Skipped biomedical (PubMed), planetary (NASA, USGS), and international development (World Bank) providers. "
+                "Enforced maximum 2 official providers. Tertiary discovery: Wikimedia."
+            )
+        elif domain == "HEALTH":
             is_gho_specific = any(k in clean_claim.lower() for k in ("gho", "global health observatory", "global surveillance", "immunization coverage"))
             is_iris_specific = any(k in clean_claim.lower() for k in ("iris", "searo", "guidelines", "technical report", "factsheet", "বিশ্ব স্বাস্থ্য", "विश्व स्वास्थ्य"))
             if is_gho_specific:

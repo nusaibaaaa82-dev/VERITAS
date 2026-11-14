@@ -30,3 +30,12 @@ Thumbs.db
 # Local scratch and test logs
 scratch/
 *.log
+
+# VERITAS Evidence Database, Staging, Backups & Sidecars
+backend/data/evidence_repository.db
+backend/data/evidence_repository.db-shm
+backend/data/evidence_repository.db-wal
+backend/data/evidence_repository.db.staging_*
+backend/data/*_backup_*
+backend/data/*_forensic_*
+backend/data/archive/

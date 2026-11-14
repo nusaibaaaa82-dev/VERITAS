@@ -65,8 +65,8 @@ CONCEPT_EQUIVALENTS: Dict[str, Set[str]] = {
     "infection": {"infections", "infectious"},
     "infections": {"infection", "infectious"},
     "infectious": {"infection", "infections"},
-    "immigrant": {"immigrants", "migrant", "migration"},
-    "immigrants": {"immigrant", "migrants", "migration"},
+    "immigrant": {"immigrants", "migrant", "migration", "alien", "aliens", "noncitizen", "noncitizens"},
+    "immigrants": {"immigrant", "migrants", "migration", "alien", "aliens", "noncitizen", "noncitizens"},
     "migrant": {"migrants", "immigrant"},
     "migrants": {"migrant", "immigrants"},
     "emission": {"emissions"},
@@ -176,6 +176,47 @@ CONCEPT_EQUIVALENTS: Dict[str, Set[str]] = {
     "নিরাপত্তা": {"security", "safety"},
     "হুমকি": {"threat", "risk"},
 
+    # Employment Rights & Labor Standards (HI / BN / ES <-> EN)
+    "wage": {"wages", "salary", "pay", "compensation", "earnings", "flsa"},
+    "wages": {"wage", "salary", "pay", "compensation", "earnings", "flsa"},
+    "overtime": {"overtime pay", "hours", "compensation"},
+    "workplace": {"employment", "job", "work", "employer", "labor"},
+    "theft": {"wage theft", "unpaid", "stolen", "underpayment", "back wages"},
+    "salario": {"wage", "wages", "salary", "sueldo"},
+    "salarios": {"wage", "wages", "salary", "sueldo"},
+    "sueldo": {"salary", "wage", "wages"},
+    "trabajador": {"worker", "employee", "laborer"},
+    "trabajadores": {"workers", "employees", "laborers"},
+    "laboral": {"labor", "employment", "workplace"},
+    "robo": {"theft", "wage theft", "stolen"},
+    "denunciar": {"report", "reporting", "file", "filed", "complaint"},
+    "denuncia": {"complaint", "report", "reporting", "file", "filed"},
+    "indocumentados": {"undocumented", "immigrant", "immigrants"},
+    "indocumentado": {"undocumented", "immigrant", "immigrants"},
+    "मजदूरी": {"wage", "wages", "salary", "pay", "compensation"},
+    "वेतन": {"salary", "wage", "wages", "pay"},
+    "कार्यस्थल": {"workplace", "employment", "job"},
+    "श्रमिक": {"worker", "workers", "labor", "laborer", "employee", "employees"},
+    "मजदूर": {"worker", "workers", "laborer", "employee"},
+    "रिपोर्ट": {"report", "reporting", "file", "filed", "complaint"},
+    "शिकायत": {"complaint", "report", "reporting", "file", "filed"},
+    "चोरी": {"theft", "wage theft", "stolen"},
+    "मजুরি": {"wage", "wages", "salary", "pay"},
+    "বেতন": {"salary", "wage", "wages", "pay"},
+    "কর্মক্ষেত্র": {"workplace", "employment", "job"},
+    "কর্মক্ষেত্রে": {"workplace", "employment", "job"},
+    "শ্রমিক": {"worker", "workers", "laborer", "employee", "employees"},
+    "শ্রমিকরা": {"worker", "workers", "laborer", "employee", "employees"},
+    "অভিযোগ": {"complaint", "report", "reporting", "file", "filed"},
+    "চুরি": {"theft", "wage theft", "stolen"},
+    "চুরির": {"theft", "wage theft", "stolen"},
+    "report": {"reporting", "reports", "reported", "file", "filed", "filing", "complaint", "complaints", "whistleblower", "instituted", "denuncia", "denunciar", "शिकायत", "অভিযোগ"},
+    "reporting": {"report", "reports", "file", "filed", "filing", "complaint", "whistleblower"},
+    "employee": {"worker", "workers", "employees", "laborer", "person"},
+    "worker": {"employee", "employees", "workers", "laborer"},
+    "workers": {"employee", "employees", "worker", "laborers"},
+    "retaliation": {"discharge", "discriminate", "threats", "adverse action", "reprisal"},
+
     # General Science (HI / BN / ES <-> EN)
     "fotosíntesis": {"photosynthesis", "chlorophyll"},
     "oxígeno": {"oxygen", "atmosphere"},
@@ -208,6 +249,28 @@ CONCEPT_EQUIVALENTS: Dict[str, Set[str]] = {
     "সূর্যের": {"sun", "solar"},
     "চারদিকে": {"orbit", "orbits", "revolve"},
     "আবর্তিত": {"orbit", "orbits", "planetary"},
+
+    # Statutory & Legal Labor / Employment Terminology (FLSA & Immigration Law)
+    "undocumented": {"unauthorized", "indocumentado", "indocumentados", "noncitizen", "noncitizens"},
+    "unauthorized": {"undocumented", "alien", "aliens", "noncitizen"},
+    "alien": {"aliens", "immigrant", "immigrants", "noncitizen", "noncitizens"},
+    "aliens": {"alien", "immigrant", "immigrants", "noncitizen", "noncitizens"},
+    "noncitizen": {"noncitizens", "immigrant", "immigrants", "alien", "aliens", "undocumented"},
+    "noncitizens": {"noncitizen", "immigrant", "immigrants", "alien", "aliens", "undocumented"},
+    "wage": {"wages", "minimum", "206", "206a", "statutory", "damages", "compensation", "earnings", "pay", "sueldo", "salario"},
+    "wages": {"wage", "minimum", "206", "206a", "statutory", "damages", "compensation", "earnings", "pay", "sueldo", "salario"},
+    "minimum": {"statutory", "mandated", "206", "206a"},
+    "workers": {"worker", "work", "employee", "employees", "laborer", "laborers", "workforce", "trabajadores"},
+    "worker": {"workers", "work", "employee", "employees", "laborer", "laborers", "workforce", "trabajador"},
+    "206": {"wage", "wages", "minimum", "flsa"},
+    "206a": {"wage", "wages", "minimum", "flsa"},
+    "207": {"overtime", "flsa", "wage", "wages"},
+    "207a": {"overtime", "flsa", "wage", "wages"},
+    "216": {"damages", "flsa", "statutory", "penalties", "remedies"},
+    "216b": {"damages", "flsa", "statutory", "penalties", "remedies"},
+    "flsa": {"fair", "labor", "standards", "act", "wage", "wages", "206", "206a", "207", "207a", "216", "216b"},
+    "standards": {"standard", "flsa"},
+    "entitled": {"eligible", "right", "rights", "authorized"},
 }
 
 # Generic statistical, temporal, and non-topical modifiers that do not establish domain relevance on their own
@@ -370,7 +433,7 @@ class EvidenceRelevanceEngine:
     @staticmethod
     def extract_content_tokens(text: str) -> Set[str]:
         """Extract significant lowercased content tokens excluding stopwords, preserving Unicode scripts."""
-        bad_chars = set("\"'*^()[]{}<>;:,.?!/@#$%&=+~|\\।॥\n\r\t")
+        bad_chars = set("\"'*^()[]{}<>;:,.?!/@#$%&=+~|\\।॥§¶`“”’\n\r\t")
         raw_words = text.lower().split()
         tokens = set()
         for w in raw_words:
@@ -497,6 +560,33 @@ class EvidenceRelevanceEngine:
                 item.stance_justification = "Off-topic biological mechanism; does not evaluate human demographic proposition."
                 return item
 
+        # 1b. Extraterrestrial / astronomical / planetary literature retrieved for human immigration / labor claims
+        if any(tok in claim_lower for tok in ("immigrant", "immigrants", "immigration", "migrant", "undocumented", "unauthorized", "inmigrante", "inmigrantes", "wage", "wages", "labor", "worker", "workers")):
+            if any(astro in snippet_lower or astro in (item.title or "").lower() for astro in (
+                "extraterrestrial", "seti", "astronomy", "astrophysics", "biosignature", "biosignatures",
+                "technosignature", "technosignatures", "exoplanet", "exoplanets", "spacecraft",
+                "interstellar", "galaxy", "galaxies", "astronomical", "ephemerides", "ephemeris", "radio telescope"
+            )):
+                if not any(lab in snippet_lower or lab in (item.title or "").lower() for lab in ("wage", "overtime", "flsa", "minimum wage", "unpaid wages", "wage theft", "workplace", "department of labor")):
+                    item.relevance_status = "IRRELEVANT"
+                    item.relevance_score = 0.0
+                    item.relevance_justification = "Domain mismatch: astronomical, planetary, or extraterrestrial search literature retrieved for human immigration or labor claim."
+                    item.stance = "NEUTRAL"
+                    item.stance_justification = "Off-topic astronomical or astrobiological study; does not evaluate human legal rights or labor protections."
+                    return item
+
+        # 1c. Human immigration / labor records retrieved for extraterrestrial / astronomy claims
+        if any(tok in claim_lower for tok in ("extraterrestrial", "seti", "alien life", "biosignature", "exoplanet", "astrobiology", "astronomy", "ufo", "uap")):
+            if any(imm in snippet_lower or imm in (item.title or "").lower() for imm in (
+                "undocumented", "department of labor", "flsa", "border patrol", "deportation", "visa", "green card", "uscis"
+            )):
+                item.relevance_status = "IRRELEVANT"
+                item.relevance_score = 0.0
+                item.relevance_justification = "Domain mismatch: human immigration or statutory labor document retrieved for astronomical or astrobiological claim."
+                item.stance = "NEUTRAL"
+                item.stance_justification = "Off-topic human legal/statutory document does not evaluate extraterrestrial proposition."
+                return item
+
         # 2. Climate papers retrieved for planetary physics / geodesy claims
         if any(tok in claim_lower for tok in ("spheroid", "curvature", "geodesy", "geodetic", "orbit", "orbits", "gravity", "lunar", "retroreflector", "plana", "esferoide", "মহাকর্ষ", "গোলক")):
             if any(clim in snippet_lower or clim in (item.title or "").lower() for clim in ("calentamiento global", "global warming", "pluviométrico", "greenhouse gas", "emissions", "drought", "जलवाय", "জলবায়ু")) and not any(geo in snippet_lower or geo in (item.title or "").lower() for geo in ("spheroid", "curvature", "geodesy", "geodetic", "gravity", "gravitational", "orbit", "orbital", "lunar", "laser ranging", "oblato", "esferoide")):
@@ -568,7 +658,66 @@ class EvidenceRelevanceEngine:
                     )
                     return item
 
+        # 7. Employment Rights & Workplace Wage Theft Protection Filter
+        is_employment_claim = any(
+            emp in claim_lower for emp in (
+                "wage", "wages", "wage theft", "workplace", "salary", "salaries", "overtime",
+                "minimum wage", "unpaid wages", "worker", "workers", "employee", "employees",
+                "labor law", "labor rights", "flsa", "salario", "sueldo", "robo de salario",
+                "मजदूरी", "वेतन", "मजदूरी चोरी", "মজুরি", "বেতন", "মজুরি চুরি"
+            )
+        )
+        if is_employment_claim:
+            # A. Filter out biomedical / vaccine / medical literature
+            if any(med in snippet_lower or med in (item.title or "").lower() for med in ("vaccin", "vacuna", "remdesivir", "immuniz", "covid", "pediatric", "hospitalized with", "टीका", "টিকা", "disease", "enfermedad")):
+                if not any(lab in snippet_lower or lab in (item.title or "").lower() for lab in ("wage", "overtime", "flsa", "minimum wage", "labor", "workplace")):
+                    item.relevance_status = "IRRELEVANT"
+                    item.relevance_score = 0.0
+                    item.relevance_justification = "Domain mismatch: biomedical / pharmaceutical paper retrieved for workplace employment rights claim."
+                    item.stance = "NEUTRAL"
+                    item.stance_justification = "Off-topic medical paper; does not evaluate workplace wage or labor rights."
+                    return item
+
+            # B. Filter out atmospheric / climate / planetary science literature
+            if any(clim in snippet_lower or clim in (item.title or "").lower() for clim in ("surface temperature", "hadcrut", "global warming", "calentamiento", "climate change", "ephemerides", "geodesy", "geoid", "photosynthesis", "तापमान", "जलवाय")):
+                if not any(lab in snippet_lower or lab in (item.title or "").lower() for lab in ("wage", "overtime", "flsa", "minimum wage", "labor", "workplace")):
+                    item.relevance_status = "IRRELEVANT"
+                    item.relevance_score = 0.0
+                    item.relevance_justification = "Domain mismatch: atmospheric, climatological, or astronomical literature retrieved for workplace employment rights claim."
+                    item.stance = "NEUTRAL"
+                    item.stance_justification = "Off-topic physical science paper; does not evaluate workplace wage or labor rights."
+                    return item
+
+            # C. Filter out general criminal justice / incarceration statistics lacking labor or wage content
+            if any(crim in snippet_lower or crim in (item.title or "").lower() for crim in ("incarceration gap", "incarceration rate", "arrest and conviction", "department of public safety", "crime rates between undocumented", "crime rate", "violent crime", "prisión", "delincuencia")):
+                if not any(lab in snippet_lower or lab in (item.title or "").lower() for lab in ("wage", "overtime", "flsa", "minimum wage", "unpaid wages", "wage theft")):
+                    item.relevance_status = "IRRELEVANT"
+                    item.relevance_score = 0.0
+                    item.relevance_justification = "Domain mismatch: general criminal incarceration or arrest rate statistics retrieved for workplace wage/labor claim."
+                    item.stance = "NEUTRAL"
+                    item.stance_justification = "General criminal justice dataset does not evaluate workplace wage theft or labor standards."
+                    return item
+
+            # D. Filter out macroeconomic fiscal studies lacking wage theft or labor standards content
+            if any(wt in claim_lower for wt in ("wage theft", "robo de salario", "मजदूरी चोरी", "মজুরি চুরি", "unpaid wages", "cannot report", "reporting workplace")):
+                if not any(w in snippet_lower or w in (item.title or "").lower() for w in ("wage", "overtime", "minimum wage", "unpaid", "flsa", "wage theft", "retaliation", "labor laws", "complaint", "discharge", "discriminate", "employee")):
+                    item.relevance_status = "IRRELEVANT"
+                    item.relevance_score = 0.0
+                    item.relevance_justification = "Document discusses general macroeconomic or fiscal metrics but does not address workplace wage protections, wage theft, or labor standards."
+                    item.stance = "NEUTRAL"
+                    item.stance_justification = "Record does not address wage reporting or labor law enforcement; stance is strictly NEUTRAL."
+                    return item
+
         # Step 2: Stance Decision (SUPPORTING, CONTRADICTING, or NEUTRAL)
+        # Curator-verified stance preservation: human curation decisions take precedence over heuristic keyword counters.
+        if item.curation_status == "APPROVED_VERIFIED" and (item.reviewer_confirmed_stance in ("SUPPORTING", "CONTRADICTING") or item.stance in ("SUPPORTING", "CONTRADICTING")):
+            item.stance = item.reviewer_confirmed_stance or item.stance
+            item.stance_justification = (
+                f"Curator-verified stance preserved ({item.stance}). "
+                f"Human curation review takes precedence over automated heuristic stance evaluation."
+            )
+            return item
+
         # Rule: Do not infer stance merely because the article discusses the same topic!
         has_refutation = any(marker in snippet_lower for marker in REFUTATION_MARKERS)
         has_affirmation = any(marker in snippet_lower for marker in AFFIRMATION_MARKERS)

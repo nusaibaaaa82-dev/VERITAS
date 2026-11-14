@@ -8,7 +8,7 @@ Responsible for:
 """
 
 import re
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from backend.schemas.claim import (
     ClaimDecompositionResult,
     EvidenceItem,
@@ -18,12 +18,20 @@ from backend.schemas.claim import (
 )
 from backend.services.relevance_engine import EvidenceRelevanceEngine
 
+if TYPE_CHECKING:
+    from backend.services.source_relationship_engine import PropositionCorroborationEngine
+
 
 class PropositionMatcherService:
     """Matches evidence items to individual propositions and calculates coverage metrics."""
 
-    def __init__(self, relevance_engine: Optional[EvidenceRelevanceEngine] = None):
+    def __init__(
+        self,
+        relevance_engine: Optional[EvidenceRelevanceEngine] = None,
+        corroboration_engine: Optional["PropositionCorroborationEngine"] = None,
+    ):
         self.relevance_engine = relevance_engine or EvidenceRelevanceEngine()
+        self.corroboration_engine = corroboration_engine
 
     def match_propositions(
         self,
@@ -251,45 +259,98 @@ class PropositionMatcherService:
                 )
                 matches_for_prop.append(match_record)
 
-            # Determine coverage status for this proposition with explicit separation of verified vs unverified matches
-            if not matches_for_prop or all(m.relevance_status in ("IRRELEVANT", "OFF_TOPIC") for m in matches_for_prop):
-                cov_status = "NO_EVIDENCE"
-                cov_note = "No usable or relevant evidence items match this specific proposition."
-                unresolved_count += 1
-            elif prop_supp > 0 and prop_cont > 0:
-                cov_status = "CONFLICTING"
-                cov_note = f"Conflicting evidence: {prop_supp} supporting ({prop_v_supp} verified) vs {prop_cont} contradicting ({prop_v_cont} verified)."
-                conflicting_count += 1
-            elif prop_supp > 0 and prop_cont == 0:
-                if prop_v_supp >= 2:
-                    cov_status = "VERIFIED_SUPPORTED"
-                    cov_note = f"Independently verified: corroborated by {prop_v_supp} verified independent sources ({prop_supp} total supporting literature records)."
+            # If corroboration engine is connected, evaluate Two-Key Gate and authority clusters
+            if self.corroboration_engine:
+                candidate_evidence = []
+                for ev in evidence_items:
+                    match_m = next((m for m in matches_for_prop if m.evidence_id == ev.id), None)
+                    if match_m and match_m.relevance_status not in ("IRRELEVANT", "OFF_TOPIC"):
+                        item_dict = ev.model_dump() if hasattr(ev, "model_dump") else dict(ev)
+                        item_dict["stance"] = match_m.stance
+                        candidate_evidence.append(item_dict)
+
+                prop_key = getattr(prop, "canonical_id", None) or getattr(prop, "canonical_proposition_hash", None) or prop.id
+                assessment = self.corroboration_engine.evaluate_proposition_corroboration(
+                    proposition_id=prop_key,
+                    candidate_evidence=candidate_evidence,
+                    temporal_scope=getattr(prop, "temporal_scope", None) or "PRESENT_OPERATIONAL",
+                    reference_period_start=getattr(prop, "reference_period_start", None),
+                    reference_period_end=getattr(prop, "reference_period_end", None),
+                    temporal_quantification=getattr(prop, "temporal_quantification", None) or "INTERSECTING",
+                    proposition_domain=getattr(prop, "domain", None) or "LEGAL",
+                )
+                cov_status = assessment.coverage_status
+                cov_note = assessment.diagnostic_notes or f"Two-Key Gate evaluated: {cov_status}."
+                auth_clusters_count = assessment.independent_clusters_count
+                v_indep_pairs = assessment.verified_independent_pairs_count
+                has_two_indep = assessment.has_two_independent_sources
+                indep_corrob = assessment.has_two_independent_sources
+                cluster_stances = [c.cluster_stance for c in assessment.clusters]
+                cluster_details = [c.model_dump() if hasattr(c, "model_dump") else dict(c) for c in assessment.clusters]
+
+                if cov_status == "VERIFIED_SUPPORTED":
                     verified_supported_count += 1
-                else:
-                    cov_status = "UNVERIFIED_MATCH_SUPPORTING"
-                    cov_note = (
-                        f"Textual literature match: {prop_supp} supporting records ({prop_v_supp} verified). "
-                        "Fails the 2-independent-verified-source requirement; cannot be presented as verified fact."
-                    )
-                    unverified_supporting_count += 1
-                supported_count += 1
-            elif prop_cont > 0 and prop_supp == 0:
-                if prop_v_cont >= 2:
-                    cov_status = "VERIFIED_CONTRADICTED"
-                    cov_note = f"Independently verified contradiction: contradicted by {prop_v_cont} verified independent sources ({prop_cont} total contradicting literature records)."
+                    supported_count += 1
+                elif cov_status == "VERIFIED_CONTRADICTED":
                     verified_contradicted_count += 1
-                else:
-                    cov_status = "UNVERIFIED_MATCH_CONTRADICTING"
-                    cov_note = (
-                        f"Textual literature dispute: {prop_cont} contradicting records ({prop_v_cont} verified). "
-                        "Fails the 2-independent-verified-source requirement; cannot be presented as verified contradiction."
-                    )
+                    contradicted_count += 1
+                elif cov_status == "UNVERIFIED_MATCH_SUPPORTING":
+                    unverified_supporting_count += 1
+                    supported_count += 1
+                elif cov_status == "UNVERIFIED_MATCH_CONTRADICTING":
                     unverified_contradicting_count += 1
-                contradicted_count += 1
+                    contradicted_count += 1
+                elif cov_status == "CONFLICTING":
+                    conflicting_count += 1
+                else:
+                    unresolved_count += 1
             else:
-                cov_status = "UNRESOLVED"
-                cov_note = "Available evidence items discuss the subject descriptively or contextually without establishing stance."
-                unresolved_count += 1
+                auth_clusters_count = 0
+                v_indep_pairs = 0
+                has_two_indep = False
+                indep_corrob = False
+                cluster_stances = []
+                cluster_details = []
+
+                # Determine coverage status for this proposition with explicit separation of verified vs unverified matches
+                if not matches_for_prop or all(m.relevance_status in ("IRRELEVANT", "OFF_TOPIC") for m in matches_for_prop):
+                    cov_status = "NO_EVIDENCE"
+                    cov_note = "No usable or relevant evidence items match this specific proposition."
+                    unresolved_count += 1
+                elif prop_supp > 0 and prop_cont > 0:
+                    cov_status = "CONFLICTING"
+                    cov_note = f"Conflicting evidence: {prop_supp} supporting ({prop_v_supp} verified) vs {prop_cont} contradicting ({prop_v_cont} verified)."
+                    conflicting_count += 1
+                elif prop_supp > 0 and prop_cont == 0:
+                    if prop_v_supp >= 2:
+                        cov_status = "VERIFIED_SUPPORTED"
+                        cov_note = f"Independently verified: corroborated by {prop_v_supp} verified independent sources ({prop_supp} total supporting literature records)."
+                        verified_supported_count += 1
+                    else:
+                        cov_status = "UNVERIFIED_MATCH_SUPPORTING"
+                        cov_note = (
+                            f"Textual literature match: {prop_supp} supporting records ({prop_v_supp} verified). "
+                            "Fails the 2-independent-verified-source requirement; cannot be presented as verified fact."
+                        )
+                        unverified_supporting_count += 1
+                    supported_count += 1
+                elif prop_cont > 0 and prop_supp == 0:
+                    if prop_v_cont >= 2:
+                        cov_status = "VERIFIED_CONTRADICTED"
+                        cov_note = f"Independently verified contradiction: contradicted by {prop_v_cont} verified independent sources ({prop_cont} total contradicting literature records)."
+                        verified_contradicted_count += 1
+                    else:
+                        cov_status = "UNVERIFIED_MATCH_CONTRADICTING"
+                        cov_note = (
+                            f"Textual literature dispute: {prop_cont} contradicting records ({prop_v_cont} verified). "
+                            "Fails the 2-independent-verified-source requirement; cannot be presented as verified contradiction."
+                        )
+                        unverified_contradicting_count += 1
+                    contradicted_count += 1
+                else:
+                    cov_status = "UNRESOLVED"
+                    cov_note = "Available evidence items discuss the subject descriptively or contextually without establishing stance."
+                    unresolved_count += 1
 
             cov = PropositionCoverage(
                 proposition_id=prop.id,
@@ -304,6 +365,13 @@ class PropositionMatcherService:
                 unverified_supporting_count=prop_supp - prop_v_supp,
                 unverified_contradicting_count=prop_cont - prop_v_cont,
                 matches=matches_for_prop,
+                independent_corroboration=indep_corrob,
+                authority_clusters_count=auth_clusters_count,
+                cluster_stances=cluster_stances,
+                cluster_details=cluster_details,
+                verified_independent_pairs_count=v_indep_pairs,
+                has_two_independent_sources=has_two_indep,
+                diagnostic_notes=cov_note,
                 notes=cov_note,
             )
             coverage_list.append(cov)

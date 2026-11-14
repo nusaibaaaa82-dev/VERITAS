@@ -14,6 +14,11 @@ It is an analytical aid and is not claimed to be a fully validated scientific NL
 import re
 from typing import List, Optional, Tuple
 from backend.schemas.claim import ClaimDecompositionResult, PropositionItem
+from backend.services.proposition_identity import (
+    compute_assertion_digest,
+    generate_stable_proposition_id,
+    normalize_assertion_text,
+)
 
 
 class ClaimDecompositionService:
@@ -75,6 +80,53 @@ class ClaimDecompositionService:
         re.compile(r"\bby\s+(\d+[\.,]?\d*)(?=[,\.;\s]|$)", re.IGNORECASE),
     ]
 
+    def _enrich_proposition(self, prop: PropositionItem, original_claim: str) -> PropositionItem:
+        """Enrich extracted proposition with deterministic IDs, domain classification, and temporal bounds."""
+        p_text = prop.text
+        # 1. Deterministic canonical ID & assertion hash
+        try:
+            norm = normalize_assertion_text(p_text)
+            prop.canonical_proposition_hash = compute_assertion_digest(norm, length=16)
+            prop.canonical_id = generate_stable_proposition_id(original_claim, p_text, decomp_version="v1")
+        except Exception:
+            prop.canonical_proposition_hash = None
+            prop.canonical_id = None
+
+        # 2. Epistemic domain & temporal scope inference
+        text_lower = (original_claim + " " + p_text).lower()
+        empirical_keywords = ("temperature", "climate", "warming", "degrees", "carbon", "dioxide", "planet", "orbit", "mercury", "sun", "earth", "ephemeris", "astronomy", "hadcrut", "copernicus")
+        if any(k in text_lower for k in empirical_keywords) and not any(k in text_lower for k in ("wage", "flsa", "immigrant", "noncitizen", "undocumented", "right", "rights", "law")):
+            prop.domain = "EMPIRICAL_NON_LEGAL"
+            prop.temporal_scope = "EMPIRICAL_NON_LEGAL"
+        else:
+            prop.domain = "LEGAL"
+            hist_years = [int(y) for y in re.findall(r"\b(18\d{2}|19\d{2}|20[0-1]\d)\b", p_text)]
+            if hist_years:
+                prop.temporal_scope = "HISTORICAL_LEGAL"
+            else:
+                prop.temporal_scope = "PRESENT_OPERATIONAL"
+
+        # 3. Temporal parameters extraction
+        m_range = re.search(r"\b(?:between|from)\s+(\d{4})\s+(?:and|to)\s+(\d{4})\b", p_text, re.IGNORECASE)
+        if m_range:
+            prop.reference_period_start = m_range.group(1)
+            prop.reference_period_end = m_range.group(2)
+            prop.temporal_quantification = "CONTINUOUS_FULL_PERIOD" if "between" in m_range.group(0).lower() or "throughout" in text_lower else "INTERSECTING"
+        else:
+            m_since = re.search(r"\b(?:since|starting in)\s+(\d{4})\b", p_text, re.IGNORECASE)
+            if m_since:
+                prop.reference_period_start = m_since.group(1)
+                prop.reference_period_end = "2026"
+                prop.temporal_quantification = "CONTINUOUS_FULL_PERIOD"
+            else:
+                m_in = re.search(r"\bin\s+(\d{4})\b", p_text, re.IGNORECASE)
+                if m_in:
+                    prop.reference_period_start = m_in.group(1)
+                    prop.reference_period_end = m_in.group(1)
+                    prop.temporal_quantification = "POINT_IN_TIME"
+
+        return prop
+
     def decompose_claim(self, claim: str, claim_id: str) -> ClaimDecompositionResult:
         """Analyze and decompose a submitted claim into structured propositions.
 
@@ -103,6 +155,7 @@ class ClaimDecompositionService:
                     "Per VERITAS scientific guidelines, automated decomposition is suspended and flagged for review."
                 ),
             )
+            ambig_prop = self._enrich_proposition(ambig_prop, cleaned_claim)
             return ClaimDecompositionResult(
                 claim_id=claim_id,
                 original_claim=cleaned_claim,
@@ -133,6 +186,7 @@ class ClaimDecompositionService:
                     "unconditional facts without distorting the claim; flagged as NEEDS_REVIEW."
                 ),
             )
+            cond_prop = self._enrich_proposition(cond_prop, cleaned_claim)
             return ClaimDecompositionResult(
                 claim_id=claim_id,
                 original_claim=cleaned_claim,
@@ -162,6 +216,7 @@ class ClaimDecompositionService:
                     "or generating distorted sub-propositions. Per VERITAS safety guidelines, flagged as NEEDS_REVIEW."
                 ),
             )
+            neg_prop = self._enrich_proposition(neg_prop, cleaned_claim)
             return ClaimDecompositionResult(
                 claim_id=claim_id,
                 original_claim=cleaned_claim,
@@ -336,6 +391,8 @@ class ClaimDecompositionService:
                     notes="Atomic single proposition; no compound syntactic boundaries detected.",
                 )
             )
+
+        extracted_props = [self._enrich_proposition(p, cleaned_claim) for p in extracted_props]
 
         status = "COMPLETED" if len(extracted_props) > 1 else "SINGLE_PROPOSITION"
         notes = (

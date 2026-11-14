@@ -14,6 +14,8 @@ Free, public evidence providers:
 
 from backend.services.providers.base import BaseEvidenceProvider
 from backend.services.providers.crossref import CrossrefProvider
+from backend.services.providers.dol_whd import DolWhdProvider
+from backend.services.providers.ecfr import EcfrProvider
 from backend.services.providers.nasa_ntrs import NasaNtrsProvider
 from backend.services.providers.openalex import OpenAlexProvider
 from backend.services.providers.pubmed import PubMedProvider
@@ -33,6 +35,7 @@ __all__ = [
     "UsgsPubsProvider",
     "WhoGhoProvider",
     "WhoIrisProvider",
-    "WikimediaProvider",
     "WorldBankProvider",
+    "DolWhdProvider",
+    "EcfrProvider",
 ]

@@ -177,33 +177,77 @@ class VerdictEngine:
                 methodology_notes=methodology_notes,
             )
 
-        # Safety Rule: If claim has multiple decomposed propositions, one proposition's evidence
-        # must NEVER establish the truth of the entire claim!
+        # Multi-proposition evaluation: Apply calibrated 5-verdict synthesis rules
         if decomposition and decomposition.total_propositions > 1:
-            not_verified_supported = [
-                cov for cov in decomposition.proposition_coverage
-                if cov.coverage_status != "VERIFIED_SUPPORTED"
+            covs = decomposition.proposition_coverage
+            v_supp = [c for c in covs if c.coverage_status == "VERIFIED_SUPPORTED"]
+            v_cont = [c for c in covs if c.coverage_status == "VERIFIED_CONTRADICTED"]
+            conflicting = [c for c in covs if c.coverage_status == "CONFLICTING"]
+            unverified_matches = [
+                c for c in covs
+                if c.coverage_status in ("UNVERIFIED_MATCH_SUPPORTING", "UNVERIFIED_MATCH_CONTRADICTING")
             ]
-            if not_verified_supported or decomposition.unresolved_propositions_count > 0 or decomposition.contradicted_propositions_count > 0:
-                unverified_match_count = sum(
-                    1 for cov in not_verified_supported
-                    if cov.coverage_status in ("UNVERIFIED_MATCH_SUPPORTING", "UNVERIFIED_MATCH_CONTRADICTING")
+            unresolved = [c for c in covs if c.coverage_status in ("NO_EVIDENCE", "UNRESOLVED")]
+
+            # 1. TRUE: All essential propositions independently corroborated by verified sources with zero contradictions
+            if len(v_supp) == decomposition.total_propositions and len(v_cont) == 0 and len(conflicting) == 0:
+                verdict = "TRUE"
+                justification = (
+                    f"The compound claim is fully corroborated: all {decomposition.total_propositions} factual sub-propositions "
+                    f"are independently verified by primary/secondary authorities with zero contradictory findings."
                 )
-                return VerdictAssessment(
-                    verdict="UNVERIFIED",
-                    justification=(
-                        f"Incomplete proposition corroboration: claim decomposed into {decomposition.total_propositions} factual "
-                        f"sub-propositions, but {len(not_verified_supported)} propositions lack independent verification "
-                        f"({unverified_match_count} have unverified literature matches, "
-                        f"{decomposition.unresolved_propositions_count} lack evidence, "
-                        f"{decomposition.contradicted_propositions_count} are contradicted). "
-                        "Evidence for one sub-clause cannot establish the truth of the compound statement as a whole."
-                    ),
-                    evidence_count=evidence_count,
-                    independent_sources_count=independent_sources_count,
-                    has_sufficient_evidence=False,
-                    methodology_notes=methodology_notes,
+                has_sufficient_evidence = True
+
+            # 2. FALSE: All propositions contradicted, or root assertion contradicted with no unresolved context
+            elif (len(v_cont) == decomposition.total_propositions or (len(v_cont) >= 1 and len(unresolved) == 0)) and len(v_supp) == 0 and len(unverified_matches) == 0:
+                verdict = "FALSE"
+                justification = (
+                    f"The claim is demonstrably FALSE: {len(v_cont)} of {decomposition.total_propositions} factual sub-propositions "
+                    f"are contradicted by verified independent sources, with zero supporting evidence identified."
                 )
+                has_sufficient_evidence = True
+
+            # 3. MISLEADING: Contains authentic/verified factual premise, but couples it with a contradicted causal driver or invalid legal extrapolation
+            elif len(v_supp) >= 1 and any(c.coverage_status == "VERIFIED_CONTRADICTED" and c.proposition_type in ("CAUSAL", "ENTITY_ASSERTION") for c in covs):
+                verdict = "MISLEADING"
+                causal_cont = [c for c in covs if c.coverage_status == "VERIFIED_CONTRADICTED" and c.proposition_type in ("CAUSAL", "ENTITY_ASSERTION")]
+                justification = (
+                    f"The claim is MISLEADING: while {len(v_supp)} sub-proposition(s) are factually accurate and corroborated, "
+                    f"the claim asserts a causal connection or legal extrapolation that is demonstrably contradicted by verified authorities "
+                    f"('{causal_cont[0].proposition_text[:50]}...')."
+                )
+                has_sufficient_evidence = True
+
+            # 4. PARTIALLY TRUE: Contains accurate factual elements, but omits essential context, overextends scope, or secondary clause is unverified/contradicted
+            elif len(v_supp) >= 1 and (len(v_cont) > 0 or len(unverified_matches) > 0 or len(unresolved) > 0):
+                verdict = "PARTIALLY TRUE"
+                justification = (
+                    f"The claim is PARTIALLY TRUE: factual elements are corroborated ({len(v_supp)} of {decomposition.total_propositions} "
+                    f"sub-propositions verified supported), but other sub-clauses are contradicted ({len(v_cont)}) or lack "
+                    f"independent primary verification ({len(unverified_matches) + len(unresolved)} unverified/unresolved)."
+                )
+                has_sufficient_evidence = True
+
+            # 5. UNVERIFIED fallback for conflicting or incomplete evidence
+            else:
+                verdict = "UNVERIFIED"
+                justification = (
+                    f"Incomplete proposition corroboration: claim decomposed into {decomposition.total_propositions} factual "
+                    f"sub-propositions, but {len(covs) - len(v_supp)} propositions lack independent verification "
+                    f"({len(unverified_matches)} have unverified literature matches, {len(unresolved)} lack evidence, "
+                    f"{len(conflicting)} have conflicting evidence). "
+                    "Evidence for one sub-clause cannot establish the truth of the compound statement as a whole."
+                )
+                has_sufficient_evidence = False
+
+            return VerdictAssessment(
+                verdict=verdict,
+                justification=justification,
+                evidence_count=evidence_count,
+                independent_sources_count=independent_sources_count,
+                has_sufficient_evidence=has_sufficient_evidence,
+                methodology_notes=methodology_notes,
+            )
 
         # Analyze stances among verified independent sources
         supporting = [e for e in verified_independent if e.stance == "SUPPORTING"]
@@ -224,16 +268,19 @@ class VerdictEngine:
                 f"The claim is corroborated by {len(supporting)} independent verified sources "
                 "with no contradictory evidence identified."
             )
+            has_sufficient = True
         elif len(contradicting) >= settings.MIN_INDEPENDENT_EVIDENCE_SOURCES and len(supporting) == 0:
             verdict = "FALSE"
             justification = (
                 f"The claim is demonstrably contradicted by {len(contradicting)} independent verified sources."
             )
+            has_sufficient = True
         else:
             verdict = "UNVERIFIED"
             justification = (
                 "Available independent verified sources are neutral, inconclusive, or insufficient to establish truth."
             )
+            has_sufficient = False
 
         # Validate that the formulated verdict is strictly in PERMITTED_VERDICTS
         assert verdict in settings.PERMITTED_VERDICTS, f"Invalid verdict: {verdict}"
@@ -243,6 +290,6 @@ class VerdictEngine:
             justification=justification,
             evidence_count=evidence_count,
             independent_sources_count=independent_sources_count,
-            has_sufficient_evidence=True,
+            has_sufficient_evidence=has_sufficient,
             methodology_notes=methodology_notes,
         )
